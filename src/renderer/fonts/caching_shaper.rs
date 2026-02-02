@@ -236,6 +236,60 @@ impl CachingShaper {
         metrics.ascent + (metrics.leading + self.linespace) / 2.0
     }
 
+    /// Detect the script for a given text string by examining the first non-ASCII character
+    fn detect_script(text: &str) -> Script {
+        for ch in text.chars() {
+            // Skip whitespace and common ASCII punctuation
+            if ch.is_ascii() {
+                continue;
+            }
+            
+            // Check Unicode ranges for various scripts
+            match ch {
+                // Khmer script (U+1780 - U+17FF)
+                '\u{1780}'..='\u{17FF}' => return Script::Khmer,
+                
+                // Arabic script (U+0600 - U+06FF)
+                '\u{0600}'..='\u{06FF}' => return Script::Arabic,
+                
+                // Hebrew script (U+0590 - U+05FF)
+                '\u{0590}'..='\u{05FF}' => return Script::Hebrew,
+                
+                // Thai script (U+0E00 - U+0E7F)
+                '\u{0E00}'..='\u{0E7F}' => return Script::Thai,
+                
+                // Devanagari script (U+0900 - U+097F)
+                '\u{0900}'..='\u{097F}' => return Script::Devanagari,
+                
+                // Bengali script (U+0980 - U+09FF)
+                '\u{0980}'..='\u{09FF}' => return Script::Bengali,
+                
+                // Tamil script (U+0B80 - U+0BFF)
+                '\u{0B80}'..='\u{0BFF}' => return Script::Tamil,
+                
+                // Telugu script (U+0C00 - U+0C7F)
+                '\u{0C00}'..='\u{0C7F}' => return Script::Telugu,
+                
+                // Myanmar script (U+1000 - U+109F)
+                '\u{1000}'..='\u{109F}' => return Script::Myanmar,
+                
+                // Lao script (U+0E80 - U+0EFF)
+                '\u{0E80}'..='\u{0EFF}' => return Script::Lao,
+                
+                // Tibetan script (U+0F00 - U+0FFF)
+                '\u{0F00}'..='\u{0FFF}' => return Script::Tibetan,
+                
+                // Sinhala script (U+0D80 - U+0DFF)
+                '\u{0D80}'..='\u{0DFF}' => return Script::Sinhala,
+                
+                _ => continue,
+            }
+        }
+        
+        // Default to Latin if no specific script detected
+        Script::Latin
+    }
+
     fn build_clusters(
         &mut self,
         word: Word<'_>,
@@ -243,11 +297,23 @@ impl CachingShaper {
     ) -> Vec<(Vec<CharCluster>, Rc<FontPair>)> {
         let mut cluster = CharCluster::new();
 
+        // Detect the script from the word text
+        let script = Self::detect_script(word.text);
+        
+        // Debug: Log what script was detected
+        if !matches!(script, Script::Latin) {
+            log::debug!("Detected script: {:?} for text: {:?}", script, word.text);
+        }
+
         // Enumerate the characters storing the glyph index in the user data so that we can position
         // glyphs according to Neovim's grid rules
         let mut parser = Parser::new(
-            Script::Latin,
+            script,
             word.grapheme_clusters().flat_map(|(cell_index, cluster)| {
+                // Debug: Log clusters from Neovim
+                if !matches!(script, Script::Latin) {
+                    log::debug!("  Cell {}: {:?}", cell_index, cluster);
+                }
                 cluster
                     .char_indices()
                     .map(move |(offset, character)| Token {
@@ -383,17 +449,21 @@ impl CachingShaper {
     pub fn shape(&mut self, word: Word<'_>, style: CoarseStyle) -> Vec<TextBlob> {
         let current_size = self.current_size();
         let glyph_width = self.font_base_dimensions().width;
+        
+        // Detect script for the word
+        let script = Self::detect_script(word.text);
 
         let mut resulting_blobs = Vec::new();
 
         for (cluster_group, font_pair) in self.build_clusters(word, style) {
-            let features = self.get_font_features(
+            let features = self.get_font_features_for_script(
                 font_pair
                     .as_ref()
                     .key
                     .font_desc
                     .as_ref()
                     .map(|desc| desc.family.as_str()),
+                script,
             );
 
             let mut shaper = self
@@ -410,16 +480,55 @@ impl CachingShaper {
             }
 
             let mut glyph_data = Vec::new();
+            
+            // Check if this is a complex script that benefits from slight overflow
+            let is_complex_script = matches!(
+                script,
+                Script::Khmer
+                    | Script::Arabic
+                    | Script::Thai
+                    | Script::Lao
+                    | Script::Devanagari
+                    | Script::Bengali
+                    | Script::Tamil
+                    | Script::Telugu
+                    | Script::Myanmar
+                    | Script::Tibetan
+                    | Script::Sinhala
+            );
+
+            // Track the actual x position as we render glyphs within this cluster group
+            // For complex scripts, we'll use continuous positioning
+            let mut current_x_pos = None;
 
             shaper.shape_with(|glyph_cluster| {
-                //Align to the grid at the start of each cluster
-                let mut x_offset = glyph_width * glyph_cluster.data as f32;
-
+                // Start position from cell index
+                let cell_index = glyph_cluster.data as f32;
+                let grid_x_offset = glyph_width * cell_index;
+                
+                // For complex scripts, use continuous positioning after the first cluster in this group
+                let base_x_offset = if is_complex_script {
+                    if let Some(pos) = current_x_pos {
+                        // Continue from where the last glyph ended
+                        pos
+                    } else {
+                        // First cluster in this group: use grid position
+                        grid_x_offset
+                    }
+                } else {
+                    // Non-complex script: always use grid position
+                    grid_x_offset
+                };
+                
+                let mut x_offset = base_x_offset;
                 for glyph in glyph_cluster.glyphs {
                     let position = (x_offset + glyph.x, -glyph.y);
                     glyph_data.push((glyph.id, position));
                     x_offset += glyph.advance;
                 }
+                
+                // Update continuous position for next cluster in this group
+                current_x_pos = Some(x_offset);
             });
 
             if glyph_data.is_empty() {
@@ -456,7 +565,7 @@ impl CachingShaper {
     }
 
     fn get_font_features(&self, name: Option<&str>) -> Vec<(String, u16)> {
-        if let Some(name) = name {
+        let features = if let Some(name) = name {
             self.options
                 .features
                 .get(name)
@@ -469,6 +578,76 @@ impl CachingShaper {
                 .unwrap_or_default()
         } else {
             vec![]
+        };
+        
+        features
+    }
+    
+    fn get_font_features_for_script(&self, name: Option<&str>, script: Script) -> Vec<(String, u16)> {
+        let mut features = self.get_font_features(name);
+        
+        // Add script-specific OpenType features
+        match script {
+            Script::Khmer => {
+                // Khmer-specific OpenType features for proper shaping
+                // These features handle the complex positioning of vowels and diacritics
+                features.extend(vec![
+                    ("pref".to_string(), 1),  // Pre-base forms
+                    ("blwf".to_string(), 1),  // Below-base forms
+                    ("abvs".to_string(), 1),  // Above-base substitutions
+                    ("psts".to_string(), 1),  // Post-base substitutions
+                    ("cfar".to_string(), 1),  // Contextual alternate forms
+                ]);
+            }
+            Script::Arabic => {
+                // Arabic contextual forms
+                features.extend(vec![
+                    ("init".to_string(), 1),  // Initial forms
+                    ("medi".to_string(), 1),  // Medial forms
+                    ("fina".to_string(), 1),  // Final forms
+                    ("liga".to_string(), 1),  // Ligatures
+                    ("calt".to_string(), 1),  // Contextual alternates
+                ]);
+            }
+            Script::Devanagari | Script::Bengali | Script::Tamil | Script::Telugu => {
+                // Indic scripts
+                features.extend(vec![
+                    ("nukt".to_string(), 1),  // Nukta forms
+                    ("akhn".to_string(), 1),  // Akhand forms
+                    ("rphf".to_string(), 1),  // Reph forms
+                    ("blwf".to_string(), 1),  // Below-base forms
+                    ("half".to_string(), 1),  // Half forms
+                    ("pstf".to_string(), 1),  // Post-base forms
+                    ("pres".to_string(), 1),  // Pre-base substitutions
+                    ("abvs".to_string(), 1),  // Above-base substitutions
+                    ("blws".to_string(), 1),  // Below-base substitutions
+                    ("psts".to_string(), 1),  // Post-base substitutions
+                ]);
+            }
+            Script::Thai | Script::Lao => {
+                // Thai and Lao tone marks and vowels
+                features.extend(vec![
+                    ("ccmp".to_string(), 1),  // Glyph composition/decomposition
+                    ("liga".to_string(), 1),  // Ligatures
+                ]);
+            }
+            Script::Myanmar => {
+                // Myanmar (Burmese) script
+                features.extend(vec![
+                    ("rphf".to_string(), 1),  // Reph forms
+                    ("pref".to_string(), 1),  // Pre-base forms
+                    ("blwf".to_string(), 1),  // Below-base forms
+                    ("pstf".to_string(), 1),  // Post-base forms
+                ]);
+            }
+            _ => {
+                // For other scripts, enable common ligatures
+                if !features.iter().any(|(f, _)| f == "liga") {
+                    features.push(("liga".to_string(), 1));
+                }
+            }
         }
+        
+        features
     }
 }

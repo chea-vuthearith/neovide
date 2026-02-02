@@ -1,0 +1,93 @@
+# Khmer Script Test File
+
+## Basic Consonants (អក្សរ)
+ក ខ គ ឃ ង
+ច ឆ ជ ឈ ញ
+ដ ឋ ឌ ឍ ណ
+ត ថ ទ ធ ន
+ប ផ ព ភ ម
+យ រ ល វ
+ស ហ ឡ អ
+
+## Vowels (ស្រៈ)
+### Independent Vowels
+ឥ ឦ ឧ ឩ ឪ ឫ ឬ ឭ ឮ ឯ ឰ ឱ ឲ ឳ
+
+### Dependent Vowels (with ក)
+កា កិ កី កឹ កឺ កុ កូ កួ
+កើ កឿ កៀ កេ កែ កៃ កោ កៅ
+
+## Complex Consonant Clusters (លក្ខណៈ)
+### With subscript consonants
+ក្ក ក្ខ ក្គ ក្ឃ ក្ង
+ក្ច ក្ឆ ក្ជ ក្ឈ ក្ញ
+ក្ដ ក្ឋ ក្ឌ ក្ឍ ក្ណ
+ក្ត ក្ថ ក្ទ ក្ធ ក្ន
+ក្ប ក្ផ ក្ព ក្ភ ក្ម
+ក្យ ក្រ ក្ល ក្វ
+ក្ស ក្ហ ក្អ
+
+### Common clusters
+ស្រ ស្ល ប្រ ត្រ ក្រ
+ស្ថ ស្ម ស្ដ ស្ក ស្ត
+
+### Triple clusters
+ស្ត្រ ស្ក្រ ក្ដ្រ
+
+## Complete Words (ពាក្យ)
+### Places
+កម្ពុជា - Cambodia
+ភ្នំពេញ - Phnom Penh
+សៀមរាប - Siem Reap
+កំពង់ចាម - Kampong Cham
+បាត់ដំបង - Battambang
+
+### Common words
+ខ្មែរ - Khmer
+ភាសា - language
+សៀវភៅ - book
+កុំព្យូទ័រ - computer
+អ្នក - person/you
+គណនី - account
+សាកលវិទ្យាល័យ - university
+រដ្ឋាភិបាល - government
+សហគមន៍ - community
+
+### Sentences
+សួស្តី។ - Hello
+អរគុណ។ - Thank you
+សុខសប្បាយទេ? - How are you?
+ខ្ញុំសុខសប្បាយ។ - I'm fine.
+អ្នកឈ្មោះអី? - What's your name?
+
+## Numbers (លេខ)
+០ ១ ២ ៣ ៤ ៥ ៦ ៧ ៨ ៩
+
+## Punctuation and Signs
+៕ ។ ៖ ៗ ៙ ៚ ៛
+
+## Diacritics (with ក)
+កំ កះ កៈ
+
+## Mixed Script Test
+Hello ជំរាបសួរ World
+123 ១២៣ ABC
+
+## Edge Cases
+### Empty subscript positions
+ដ្ឋ ធ្ម ប្ដ
+
+### Multiple vowels
+កើយ កៀន កៅហ៍
+
+### Sign combinations
+កំុំ កុះះ
+
+## Reading Test (Sample Text)
+ប្រទេសកម្ពុជាមានប្រជាជនជាង១៥លាននាក់។
+ភាសាខ្មែរជាភាសាផ្លូវការ។
+រាជធានីគឺភ្នំពេញ។
+កម្ពុជាមានប្រវត្តិសាស្ត្រយូរយារណាស់។
+
+---
+Test complete
