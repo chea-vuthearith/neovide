@@ -5,7 +5,8 @@ use log::{debug, error, info, trace};
 use lru::LruCache;
 use skia_safe::{
     graphics::{font_cache_limit, font_cache_used, set_font_cache_limit},
-    TextBlob, TextBlobBuilder,
+    textlayout::FontCollection,
+    FontMgr, TextBlob, TextBlobBuilder,
 };
 use swash::{
     shape::ShapeContext,
@@ -40,12 +41,16 @@ pub struct CachingShaper {
     scale_factor: f32,
     linespace: f32,
     font_info: Option<(Metrics, f32)>,
+    font_collection: FontCollection,
 }
 
 impl CachingShaper {
     pub fn new(scale_factor: f32) -> CachingShaper {
         let options = FontOptions::default();
         let font_size = options.size * scale_factor;
+        let mut font_collection = FontCollection::new();
+        font_collection.set_default_font_manager(FontMgr::default(), None);
+        
         let mut shaper = CachingShaper {
             options,
             font_loader: FontLoader::new(font_size),
@@ -54,6 +59,7 @@ impl CachingShaper {
             scale_factor,
             linespace: 0.0,
             font_info: None,
+            font_collection,
         };
         shaper.reset_font_loader();
         shaper
@@ -288,6 +294,35 @@ impl CachingShaper {
         
         // Default to Latin if no specific script detected
         Script::Latin
+    }
+    
+    /// Check if a script requires complex shaping (GPOS positioning)
+    pub fn is_complex_script(script: Script) -> bool {
+        matches!(
+            script,
+            Script::Khmer
+                | Script::Arabic
+                | Script::Thai
+                | Script::Lao
+                | Script::Devanagari
+                | Script::Bengali
+                | Script::Tamil
+                | Script::Telugu
+                | Script::Myanmar
+                | Script::Tibetan
+                | Script::Sinhala
+                | Script::Hebrew
+        )
+    }
+    
+    /// Public method to detect script from text
+    pub fn detect_text_script(&self, text: &str) -> Script {
+        Self::detect_script(text)
+    }
+    
+    /// Get the font collection for paragraph rendering
+    pub fn font_collection(&self) -> &FontCollection {
+        &self.font_collection
     }
 
     fn build_clusters(

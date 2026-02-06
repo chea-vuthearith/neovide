@@ -1,7 +1,10 @@
 use std::{ops::Range, sync::Arc};
 
 use log::trace;
-use skia_safe::{colors, dash_path_effect, BlendMode, Canvas, Color, Paint, Path, HSV};
+use skia_safe::{
+    colors, dash_path_effect, BlendMode, Canvas, Color, Paint, Path, HSV,
+    textlayout::{ParagraphBuilder, ParagraphStyle, TextStyle as SkiaTextStyle},
+};
 
 use crate::{
     editor::{Colors, LineFragment, Style, UnderlineStyle},
@@ -246,14 +249,55 @@ impl GridRenderer {
                     self.shaper.baseline_offset(),
                 );
 
-                for blob in self.shaper.shape_cached(word, style.into()).iter() {
-                    tracy_zone!("draw_text_blob");
-                    text_canvas.draw_text_blob(
-                        blob,
-                        to_skia_point(region.min + adjustment),
-                        &paint,
-                    );
+                // Detect if this word contains complex script
+                let script = self.shaper.detect_text_script(word.text);
+                let is_complex = crate::renderer::fonts::caching_shaper::CachingShaper::is_complex_script(script);
+
+                if is_complex {
+                    // Use Skia's Paragraph API for complex scripts (with HarfBuzz)
+                    tracy_zone!("draw_paragraph");
+                    
+                    let paragraph_style = ParagraphStyle::new();
+                    let mut text_style = SkiaTextStyle::new();
+                    text_style.set_font_size(self.em_size);
+                    text_style.set_color(paint.color());
+                    
+                    // Set font families - this helps Skia pick the right font with Khmer support
+                    // We use the configured font names from the shaper
+                    let font_families: Vec<String> = self.shaper.font_names();
+                    if !font_families.is_empty() {
+                        text_style.set_font_families(&font_families);
+                    }
+                    
+                    // Get the font collection from the shaper
+                    let font_collection = self.shaper.font_collection();
+                    
+                    let mut paragraph_builder = ParagraphBuilder::new(&paragraph_style, font_collection);
+                    paragraph_builder.push_style(&text_style);
+                    paragraph_builder.add_text(word.text);
+                    
+                    let mut paragraph = paragraph_builder.build();
+                    
+                    // Layout the paragraph with a generous width to allow natural overflow
+                    // We'll clip it later
+                    let layout_width = self.grid_scale.width() * 10.0; // Allow up to 10 cells of overflow
+                    paragraph.layout(layout_width);
+                    
+                    // Draw the paragraph at the grid position
+                    let draw_pos = region.min + adjustment;
+                    paragraph.paint(text_canvas, (draw_pos.x, draw_pos.y));
                     text_drawn = true;
+                } else {
+                    // Use existing TextBlob approach for Latin scripts (faster)
+                    for blob in self.shaper.shape_cached(word, style.into()).iter() {
+                        tracy_zone!("draw_text_blob");
+                        text_canvas.draw_text_blob(
+                            blob,
+                            to_skia_point(region.min + adjustment),
+                            &paint,
+                        );
+                        text_drawn = true;
+                    }
                 }
             }
 
