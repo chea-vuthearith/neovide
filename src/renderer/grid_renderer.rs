@@ -197,6 +197,8 @@ impl GridRenderer {
         } = fragment;
 
         let region = self.compute_text_region(cells);
+        log::debug!("draw_foreground called: text='{}', cells={:?}, region.min.y={}", 
+            text, cells, region.min.y);
 
         let style = style.as_ref().unwrap_or(&self.default_style);
         let mut text_drawn = false;
@@ -224,13 +226,11 @@ impl GridRenderer {
         ) {
             return (text_drawn, true);
         } else if !text.is_empty() {
-            text_canvas.save();
-
             // We don't want to clip text in the x position, only the y so we add a buffer of 1
             // character on either side of the region so that we clip vertically but not horizontally.
             let wider_cells = cells.start.saturating_sub(1)..cells.end + 1;
             let clip_region = self.compute_text_region(&wider_cells);
-            text_canvas.clip_rect(to_skia_rect(&clip_region), None, Some(false));
+            log::debug!("Base clip region: {:?}, grid_scale.height: {}", clip_region, self.grid_scale.height());
 
             let mut paint = Paint::default();
             paint.set_anti_alias(false);
@@ -257,38 +257,72 @@ impl GridRenderer {
                     // Use Skia's Paragraph API for complex scripts (with HarfBuzz)
                     tracy_zone!("draw_paragraph");
                     
-                    let paragraph_style = ParagraphStyle::new();
+                    log::debug!("Rendering complex script word: '{}' at cell {}", word.text, word.cell);
+                    
+                    // Save canvas state (no clipping for complex scripts - let them render naturally)
+                    text_canvas.save();
+                    
+                    log::debug!("Rendering complex script WITHOUT clipping");
+                    
+                    // Create text style with correct settings
                     let mut text_style = SkiaTextStyle::new();
                     text_style.set_font_size(self.em_size);
-                    text_style.set_color(paint.color());
                     
-                    // Set font families - this helps Skia pick the right font with Khmer support
-                    // We use the configured font names from the shaper
-                    let font_families: Vec<String> = self.shaper.font_names();
+                    // Create a Paint with the foreground color
+                    let mut text_paint = Paint::default();
+                    text_paint.set_color(paint.color());
+                    text_style.set_foreground_paint(&text_paint);
+                    
+                    // Set configured font families
+                    let font_families = self.shaper.configured_font_families();
                     if !font_families.is_empty() {
                         text_style.set_font_families(&font_families);
+                    } else {
+                        // Fallback to monospace if no configured fonts
+                        text_style.set_font_families(&["monospace"]);
                     }
+                    
+                    // Create paragraph style and set text style
+                    let mut paragraph_style = ParagraphStyle::new();
+                    paragraph_style.set_text_style(&text_style);
                     
                     // Get the font collection from the shaper
                     let font_collection = self.shaper.font_collection();
                     
+                    // Build paragraph with proper push/pop
                     let mut paragraph_builder = ParagraphBuilder::new(&paragraph_style, font_collection);
                     paragraph_builder.push_style(&text_style);
                     paragraph_builder.add_text(word.text);
+                    paragraph_builder.pop();  // IMPORTANT: pop the style
                     
                     let mut paragraph = paragraph_builder.build();
                     
-                    // Layout the paragraph with a generous width to allow natural overflow
-                    // We'll clip it later
-                    let layout_width = self.grid_scale.width() * 10.0; // Allow up to 10 cells of overflow
+                    // Layout the paragraph with a very large width to prevent wrapping
+                    // We want the text to flow naturally in a single line
+                    let layout_width = 10000.0; // Very large width to prevent any wrapping
                     paragraph.layout(layout_width);
                     
+                    log::debug!("Paragraph: width={}, height={}", 
+                        paragraph.max_intrinsic_width(), paragraph.height());
+                    
                     // Draw the paragraph at the grid position
-                    let draw_pos = region.min + adjustment;
-                    paragraph.paint(text_canvas, (draw_pos.x, draw_pos.y));
+                    // IMPORTANT: Paragraph uses top-left coordinates, NOT baseline!
+                    // Calculate position based on the word's cell and the region
+                    let x_pos = region.min.x + word.cell as f32 * self.grid_scale.width();
+                    let y_pos = region.min.y; // Use region top
+                    paragraph.paint(text_canvas, (x_pos, y_pos));
+                    
+                    // Restore canvas state (removes the expanded clip region)
+                    text_canvas.restore();
                     text_drawn = true;
                 } else {
                     // Use existing TextBlob approach for Latin scripts (faster)
+                    log::debug!("Rendering Latin text: '{}' at cell {} using TextBlob", word.text, word.cell);
+                    
+                    // Save canvas state and apply normal clipping for this word
+                    text_canvas.save();
+                    text_canvas.clip_rect(to_skia_rect(&clip_region), None, Some(false));
+                    
                     for blob in self.shaper.shape_cached(word, style.into()).iter() {
                         tracy_zone!("draw_text_blob");
                         text_canvas.draw_text_blob(
@@ -298,10 +332,16 @@ impl GridRenderer {
                         );
                         text_drawn = true;
                     }
+                    
+                    // Restore canvas state
+                    text_canvas.restore();
                 }
             }
 
             if style.strikethrough {
+                text_canvas.save();
+                text_canvas.clip_rect(to_skia_rect(&clip_region), None, Some(false));
+                
                 let line_position = region.center().y;
                 paint.set_color(style.special(&self.default_style.colors).to_color());
                 text_canvas.draw_line(
@@ -310,8 +350,9 @@ impl GridRenderer {
                     &paint,
                 );
                 text_drawn = true;
+                
+                text_canvas.restore();
             }
-            text_canvas.restore();
         }
         (text_drawn, false)
     }

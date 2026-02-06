@@ -174,6 +174,15 @@ impl CachingShaper {
     pub fn font_names(&self) -> Vec<String> {
         self.font_loader.font_names()
     }
+    
+    /// Get the configured font family from options (for Paragraph API)
+    pub fn configured_font_families(&self) -> Vec<String> {
+        self.options
+            .font_list(CoarseStyle::default())
+            .iter()
+            .map(|desc| desc.family.clone())
+            .collect()
+    }
 
     fn info(&mut self) -> (Metrics, f32) {
         if let Some(info) = self.font_info {
